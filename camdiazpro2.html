@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CAM STUDIO LOCAL + REMOTE FIX</title>
+
+<style>
+:root{
+  --bg:#f8fafc;
+  --surface:#ffffff;
+  --border:#e2e8f0;
+  --accent:#0f172a;
+  --vlc:#f97316;
+  --ffplay:#10b981;
+  --local:#6366f1;
+  --danger:#ef4444;
+  --fg:#1e293b;
+}
+
+body{margin:0;font-family:Arial;background:var(--bg);color:var(--fg)}
+
+header{
+  background:var(--accent);
+  color:white;
+  padding:14px;
+  display:flex;
+  justify-content:space-between;
+}
+
+.container{max-width:1100px;margin:auto;padding:16px}
+
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+  gap:12px;
+}
+
+.card{
+  background:white;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:12px;
+}
+
+input{padding:8px;margin:4px;width:200px}
+
+button{
+  border:none;
+  padding:6px;
+  margin:2px;
+  border-radius:6px;
+  cursor:pointer;
+}
+
+.btn-vlc{background:var(--vlc);color:white}
+.btn-ff{background:var(--ffplay);color:white}
+.btn-local{background:var(--local);color:white}
+.btn-edit{background:#3b82f6;color:white;width:100%}
+.btn-del{background:var(--danger);color:white}
+.btn-save{background:#22c55e;color:white}
+</style>
+</head>
+
+<body>
+
+<header>
+  <div>🎥 CAM STUDIO LOCAL + REMOTE</div>
+
+  <div>
+    <button onclick="exportData()">Export</button>
+    <button onclick="document.getElementById('file').click()">Import</button>
+    <input type="file" id="file" hidden onchange="importData(event)">
+  </div>
+</header>
+
+<div class="container">
+
+<h3>Aggiungi camera</h3>
+
+<input id="name" placeholder="Nome (ingresso, studio...)">
+<input id="ip" placeholder="IP remoto (DDNS o pubblico)">
+<input id="port" value="554">
+<input id="user" value="admin">
+<input id="pw" type="password">
+
+<button class="btn-save" onclick="addCam()">Salva</button>
+
+<h3>Camere</h3>
+<div id="grid" class="grid"></div>
+
+</div>
+
+<!-- EDIT -->
+<div id="modal" style="display:none;position:fixed;inset:0;background:#0008">
+  <div style="background:white;max-width:500px;margin:10% auto;padding:14px;border-radius:12px">
+
+    <h3>EDIT CAMERA</h3>
+
+    <input id="e_name">
+    <input id="e_ip">
+    <input id="e_port">
+    <input id="e_user">
+    <input id="e_pw">
+
+    <button class="btn-save" onclick="saveEdit()">SAVE</button>
+    <button class="btn-del" onclick="closeModal()">CLOSE</button>
+
+  </div>
+</div>
+
+<script>
+
+const DB="cams_final_local_remote";
+let editIndex=null;
+
+/* LOCAL IP MAP */
+function getLocalIP(name){
+  const map={
+    "soggiorno":"192.168.1.140",
+    "ingresso":"192.168.1.144",
+    "studio":"192.168.1.147",
+    "retro":"192.168.1.143",
+    "cucina":"192.168.1.148"
+  };
+
+  return map[name?.toLowerCase()] || "192.168.1.140";
+}
+
+function load(){
+  return JSON.parse(localStorage.getItem(DB)||"[]");
+}
+
+function save(d){
+  localStorage.setItem(DB,JSON.stringify(d));
+}
+
+/* RTSP REMOTO (porta variabile) */
+function rtspRemote(c){
+  return `rtsp://${c.user}:${c.pw}@${c.ip}:${c.port}/user=${c.user}_password=${c.pw}_channel=1_stream=0.sdp`;
+}
+
+/* RTSP LOCALE (porta fissa 554) */
+function rtspLocal(c){
+  const ip = getLocalIP(c.name);
+
+  return `rtsp://${c.user}:${c.pw}@${ip}:554/user=${c.user}_password=${c.pw}_channel=1_stream=0.sdp`;
+}
+
+/* ADD */
+function addCam(){
+  const cams=load();
+
+  cams.push({
+    name:name.value||"Cam",
+    ip:ip.value||"",
+    port:port.value||"554",
+    user:user.value||"admin",
+    pw:pw.value||""
+  });
+
+  save(cams);
+  render();
+}
+
+/* VLC REMOTO */
+function openVLC(i){
+  const c=load()[i];
+  window.location=rtspRemote(c);
+}
+
+/* FFPLAY REMOTO */
+function copyFF(i){
+  const c=load()[i];
+
+  const cmd=`ffplay -rtsp_transport tcp "${rtspRemote(c)}"`;
+
+  navigator.clipboard.writeText(cmd);
+}
+
+/* FFPLAY LOCALE */
+function ffplayLocal(i){
+  const c=load()[i];
+
+  const cmd=`ffplay -rtsp_transport tcp -fflags nobuffer -flags low_delay "${rtspLocal(c)}"`;
+
+  navigator.clipboard.writeText(cmd);
+
+  alert("FFPLAY LOCALE copiato (porta 554)");
+}
+
+/* RENDER */
+function render(){
+  const cams=load();
+
+  document.getElementById("grid").innerHTML=cams.map((c,i)=>`
+    <div class="card">
+
+      <b>${c.name}</b>
+      <div>${c.ip}:${c.port}</div>
+
+      <button class="btn-vlc" onclick="openVLC(${i})">▶ VLC</button>
+      <button class="btn-ff" onclick="copyFF(${i})">📋 FFPLAY REMOTO</button>
+      <button class="btn-local" onclick="ffplayLocal(${i})">🖥 FFPLAY LOCALE</button>
+
+      <button class="btn-edit" onclick="openEdit(${i})">EDIT</button>
+      <button class="btn-del" onclick="del(${i})">DELETE</button>
+
+    </div>
+  `).join('');
+}
+
+/* EDIT */
+function openEdit(i){
+  editIndex=i;
+  const c=load()[i];
+
+  e_name.value=c.name;
+  e_ip.value=c.ip;
+  e_port.value=c.port;
+  e_user.value=c.user;
+  e_pw.value=c.pw;
+
+  document.getElementById("modal").style.display="block";
+}
+
+function saveEdit(){
+  const cams=load();
+
+  cams[editIndex]={
+    name:e_name.value,
+    ip:e_ip.value,
+    port:e_port.value,
+    user:e_user.value,
+    pw:e_pw.value
+  };
+
+  save(cams);
+  closeModal();
+  render();
+}
+
+function closeModal(){
+  document.getElementById("modal").style.display="none";
+}
+
+function del(i){
+  const cams=load();
+  cams.splice(i,1);
+  save(cams);
+  render();
+}
+
+function exportData(){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(load(),null,2)]));
+  a.download="cams.json";
+  a.click();
+}
+
+function importData(e){
+  const r=new FileReader();
+
+  r.onload=()=>{
+    try{
+      save(JSON.parse(r.result||"[]"));
+      render();
+    }catch{
+      alert("JSON non valido");
+    }
+  };
+
+  r.readAsText(e.target.files[0]);
+}
+
+render();
+
+</script>
+
+</body>
+</html>
